@@ -126,7 +126,7 @@ static void RCC_Configuration(void)
 	RCC_APB1PeriphClockCmd(RCC_APBPeriph_UART3, ENABLE);
 
 	/* DMA clock enable */
-	RCC_APB1PeriphClockCmd(RCC_AHB1Periph_DMA1, ENABLE);
+	RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_DMA1, ENABLE);
 #endif
 }
 
