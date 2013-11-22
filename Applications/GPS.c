@@ -1,7 +1,11 @@
 /* 
  * GPS.c
+ * Author: Anson Wang
  *
  * This module provides interface for accessing information from the GPS sensor.
+ * All interpreted data is contained in the global structure GPS_Data.
+ * GPS data is read from the serial port, and transfered to main memory by DMA.
+ * Then, in the USART_IRQHandler, raw GPS data is parsed and stored into GPS_Data.
  *
  */
 
@@ -17,7 +21,7 @@ GPS_Data_t GPS_Data;  // the GPS data structure that stores interpreted GPS data
 /* Private Variables */
 static char GPS_buf[GPS_BUF_LEN];  // buffer for receiving NMEA 0183 formatted data
 
-/* Declaration of private functions */
+/* Function Prototypes */
 static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g);
 static void GPS_parse(char* s, GPS_Data_t* g);
 static rt_int32_t NMEA_atoi(const char* s);

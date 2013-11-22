@@ -6,6 +6,15 @@
 #define GPS_USART_BAUD_RATE    115200
 #define GPS_BUF_LEN            100
 
+
+/* 
+ * TODO: Using int to represent lat,long and speed has 
+ * the problem that one cannot know where the decimal
+ * point lies. Possible fix is to add another variable
+ * indicating the powers of 10.
+ */
+
+
 typedef struct {
     // Navigation succeeded or not.
     rt_bool_t  valid;
@@ -26,7 +35,8 @@ typedef struct {
 // accessed. Before any access to the GPS_struct, one should set
 // this busy flag, so that the parser will not modifiy the struct.
 extern rt_bool_t   GPS_struct_busy;
-extern GPS_Data_t  gps;
+// Global structure that stores interpreted gps information
+extern GPS_Data_t  GPS_Data;
 
 void GPS_Init(void);
 

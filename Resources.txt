@@ -1,0 +1,16 @@
+SPI1 <-> NRF24L01
+  PA7 - MOSI
+  PA6 - MISO
+  PA5 - SCK
+  PA4 - CSN (chip select)
+
+PC4 - CE (chip enable)
+PC5 - IRQ
+
+USART1 <-> GPS
+  PA9 - TX
+  PA10 - RX
+
+USART2 <-> Finsh
+  PA2 - TX
+  PA3 - RX
