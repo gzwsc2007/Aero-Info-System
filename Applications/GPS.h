@@ -1,6 +1,8 @@
 #ifndef _GPS_H_
 #define _GPS_H_
 
+#include "MAVlink_include/common/mavlink.h"
+
 // USART Settings for receiving GPS Data 
 #define GPS_USART              USART1
 #define GPS_USART_BAUD_RATE    115200
@@ -8,26 +10,21 @@
 
 
 /* 
- * TODO: Using int to represent lat,long and speed has 
- * the problem that one cannot know where the decimal
- * point lies. Possible fix is to add another variable
- * indicating the powers of 10.
+ * Data in this strucct is compatible with the MAVlink protocol
  */
-
-
 typedef struct {
     // Navigation succeeded or not.
     rt_bool_t  valid;
-    // Geographic position. Encoded as an integer in the format
-    // d d m m . m m m m m (degree & minute)
+    // Geographic position. Encoded as an integer with unit
+    // 10^-7 degree
     rt_int32_t latitude;   // positive - N , negative - S
-    // d d d m m . m m m m m 
+    // Encoded as an integer with unit 10^-7 degree
     rt_int32_t longitude;  // positive - E , negative - W
-    // speed in knot, encoded in integer as ssss (meaning sss.s)
-    rt_int16_t speed;
+    // speed in 0.01 m/s
+    rt_uint16_t speed;
     // course in degree (0 deg corresponds to geographic North).
-    // Encoded in integer as cccc (meaning ccc.c)
-    rt_int16_t course;
+    // Encoded with unit 0.01 deg
+    rt_uint16_t course;
 } GPS_Data_t;
     
 
@@ -39,5 +36,7 @@ extern rt_bool_t   GPS_struct_busy;
 extern GPS_Data_t  GPS_Data;
 
 void GPS_Init(void);
+
+void GPS_fillMavlinkStruct(mavlink_gps_raw_int_t *m);
 
 #endif

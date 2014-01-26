@@ -1,6 +1,12 @@
 #ifndef _NRF24L01_H_
 #define _NRF24L01_H_
 
+#define NRF24_CE_HIGH() GPIO_SetBits(NRF24_CE_PORT, NRF24_CE_PIN)
+#define NRF24_CE_LOW()  GPIO_ResetBits(NRF24_CE_PORT, NRF24_CE_PIN)
+
+#define NRF24_CSN_LOW()  GPIO_ResetBits(NRF24_CS_PORT, NRF24_CS_PIN)  // pull CS low
+#define NRF24_CSN_HIGH() GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN)  // pull CS high 
+
 // SPI port used for NRF24L01
 #define NRF24_SPI_PORT  SPI1
 // The CS pin for SPI
@@ -50,6 +56,7 @@ typedef enum
 #define NRF24_COMMAND_FLUSH_TX                          0xe1
 #define NRF24_COMMAND_FLUSH_RX                          0xe2
 #define NRF24_COMMAND_REUSE_TX_PL                       0xe3
+#define NRF24_COMMAND_ACTIVATE                          0x50
 #define NRF24_COMMAND_R_RX_PL_WID                       0x60
 #define NRF24_COMMAND_W_ACK_PAYLOAD                     0xa8
 #define NRF24_COMMAND_W_TX_PAYLOAD_NOACK                0xb0
@@ -217,9 +224,10 @@ void radio_thread_entry(void *parameter);
  * mode after transmission is complete (since CE is kept high). Client may want to
  * manually switch the radio back to RX_MODE.
  *
- * Return value indicates whether the LAST transmission was successful or not
+ * The function will suspend the calling thread until the transmission is 
+ * complete. Return value is the transmission status.
  */
-rt_bool_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack);
+rt_uint8_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack);
 
 /*
  * Check if there is a valid payload in the RX_FIFO of the radio. If yes, copy it
@@ -231,5 +239,8 @@ rt_bool_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack);
  * Return RT_TRUE if a payload is copied into buf, and RT_FALSE otherwise.
  */
 rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len);
+
+
+void printRegisters(void);
 
 #endif

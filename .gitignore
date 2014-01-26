@@ -4,6 +4,7 @@
 
 # ignore the Keil project folder
 Project/
+IAR_Project/
 
 # ignore temp files
 ~$*

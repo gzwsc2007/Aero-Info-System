@@ -14,3 +14,11 @@ USART1 <-> GPS
 USART2 <-> Finsh
   PA2 - TX
   PA3 - RX
+
+I2C1 <-> I2C Sensors
+
+USART3 <-> MPU6050
+  PA10 - TX
+  PA11 - RX
+
+PC0 - RDY pin for ADS1115

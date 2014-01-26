@@ -1,1 +1,10 @@
-Hello
+This is a self-project about developing an embedded system that can gather information about an in-flight RC airplane and transmit the data back to the ground station, which is my laptop for now. The flight information and corresponding sensors are as the following:
+
+    attitude   <----->  MPU6050 motion sensor
+    altitude   <----->  BMP085 barometer
+    airspeed   <----->  MPXV7002 differential pressure sensor
+    position   <----->  Ublox Neo-6M GPS
+    ground speed <--->  Ublox Neo-6M GPS
+    battery    <----->  Current/Voltage sensor
+
+This embedded system is based on the STM32F4-Discovery board, and the RT-Thread real-time OS.

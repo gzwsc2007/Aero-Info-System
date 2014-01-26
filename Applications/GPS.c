@@ -12,9 +12,12 @@
 #include "stm32f4xx.h"
 #include <rtthread.h>
 #include <string.h>
+#include "MAVlink_include/common/mavlink.h"
 #include "GPS.h"
+#include <inttypes.h>
+#include "Telemetry.h"
 
-/* Gloabl Variables Declaration */
+/* Gloabl Variables Definitions */
 rt_bool_t GPS_struct_busy = RT_FALSE;  // indicates whether the GPS data is being accessed
 GPS_Data_t GPS_Data;  // the GPS data structure that stores interpreted GPS data.
 
@@ -25,6 +28,7 @@ static char GPS_buf[GPS_BUF_LEN];  // buffer for receiving NMEA 0183 formatted d
 static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g);
 static void GPS_parse(char* s, GPS_Data_t* g);
 static rt_int32_t NMEA_atoi(const char* s);
+static rt_int32_t NMEA_convertLatLong(char *b);
 
 
 /* 
@@ -41,7 +45,7 @@ void USART1_IRQHandler()
         temp = GPS_USART->SR;
         temp = GPS_USART->DR;
 
-        // Temporarily diasble DMA
+        // Temporarily diasble DMA so that we can safely access GPS_buf
         DMA_Cmd(DMA2_Stream5, DISABLE);
         // Obtain the valid length of the GPS_buf
         temp = GPS_BUF_LEN - DMA_GetCurrDataCounter(DMA2_Stream5);
@@ -50,9 +54,8 @@ void USART1_IRQHandler()
         if (!GPS_struct_busy)
         {
             GPS_buf[temp] = '\0';
-            //rt_kprintf(GPS_buf);
             GPS_parse(GPS_buf, &GPS_Data); 
-           rt_kprintf("valid %d lat %d long %d speed %d\n", GPS_Data.valid, GPS_Data.latitude, GPS_Data.longitude, GPS_Data.speed);
+            rt_event_send(&event_drdy, EVENT_GPS_DATA_RDY);
         }
         
         // Reset the DMA data counter
@@ -60,6 +63,35 @@ void USART1_IRQHandler()
         // Re-enable DMA
         DMA_Cmd(DMA2_Stream5, ENABLE);
     }
+}
+
+
+void GPS_fillMavlinkStruct(mavlink_gps_raw_int_t *m)
+{
+    if (GPS_struct_busy)
+        return;
+    else 
+        GPS_struct_busy = RT_TRUE;
+    
+    if (!GPS_Data.valid) 
+    {
+        m->fix_type = 0; // for me, 0: invalid data
+        GPS_struct_busy = RT_FALSE;
+        return;
+    }
+    
+    m->time_usec = (uint64_t)rt_tick_get() * (uint64_t)1000;
+    m->fix_type = 1; // 0-1: no fix. 
+    m->lat = GPS_Data.latitude;
+    m->lon = GPS_Data.longitude;
+    m->alt = 0; // gps alt not known
+    m->eph = 0xFFFF;
+    m->epv = 0xFFFF;
+    m->vel = GPS_Data.speed;
+    m->cog = GPS_Data.course;
+    m->satellites_visible = 0xFF; // unknown
+    
+    GPS_struct_busy = RT_FALSE;
 }
 
 
@@ -103,6 +135,8 @@ static void GPS_parse(char* s, GPS_Data_t* g)
 /* Helper function to parse GPRMC string */
 static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
 {
+    rt_int32_t temp;
+    
     if (*b == '\0') return;
     
     switch(i) 
@@ -114,7 +148,7 @@ static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
             break;
         // Latitude
         case 3:
-            g->latitude = NMEA_atoi(b);
+            g->latitude = NMEA_convertLatLong(b);
             break;
         // N or S Hemisphere
         case 4:
@@ -122,7 +156,7 @@ static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
             break;
         // Longitude
         case 5:
-            g->longitude = NMEA_atoi(b);
+            g->longitude = NMEA_convertLatLong(b);
             break;
         // E or W Hemisphere
         case 6:
@@ -130,13 +164,41 @@ static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
             break;
         // Ground speed
         case 7:
-            g->speed = NMEA_atoi(b);
+            temp = NMEA_atoi(b);
+            g->speed = (rt_uint16_t)(temp * 643 / 125); // convert 1 knot to 0.01 m/s
             break;
         // Course
         case 8:
-            g->course = NMEA_atoi(b);
+            g->course = (rt_uint16_t)NMEA_atoi(b) * 10;
             break;
     }
+}
+
+
+/* 
+ * Helper function to convert raw GPRMC lat/long string to an integer
+ * with unit 10^-7 degree.
+ */
+static rt_int32_t NMEA_convertLatLong(char *b) {
+    char *tmp = strchr(b, '.'); // locate the '.' char
+    double min;
+    int deg;
+    int result;
+     
+    // convert minute into the form of mm.mmmm
+    tmp = tmp - 2; // go back to the first 'm'
+    min = (double)NMEA_atoi(tmp);
+    
+    // convert degree into a single integer
+    *tmp = '\0'; // safe to modify b in this case
+    deg = NMEA_atoi(b);
+    
+    // scaling
+    result = deg * 10000000; // scale 1 deg to 10^-7 deg
+    min = (min / 600000.0) * 10000000.0; // convert minute to 10^-7 deg
+    
+    result = result + (rt_int32_t)min;
+    return result;
 }
 
 

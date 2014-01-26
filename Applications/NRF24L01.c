@@ -10,7 +10,6 @@
 
 #include "stm32f4xx.h"
 #include <rtthread.h>
-#include <string.h>
 #include "NRF24L01.h"
 
 /* Public global variables */
@@ -24,7 +23,7 @@ volatile static rt_uint8_t status;  // status of the NRF24L01 radio
 struct rt_semaphore sem_sent;  // used to wait for transmission to complete
 
 /* NRF24L01 util functions */
-static void printRegisters(void);
+//void printRegisters(void); // moved to .h file
 static rt_uint8_t statusRead(void);
 static void flushTx(void);
 static void flushRx(void);
@@ -48,13 +47,14 @@ static void SPI_BurstReadRegister(rt_uint8_t reg, rt_uint8_t *dest,
 static void SPI_BurstWriteRegister(rt_uint8_t reg, rt_uint8_t *src, 
                                    rt_uint8_t len);
 static void Interface_Init(void);
+static void delayus(unsigned long);
 
 
 
-/*
+/* TODO: This might not be a good idea for MAVlink implementation
  * The Radio_Thread, responsible for transmitting and receiving message at a constant
  * period (about 25 times per second).
- */
+ 
 void radio_thread_entry(void *parameter)
 {
     // initialize the "sem_sent" semaphore
@@ -78,22 +78,24 @@ void radio_thread_entry(void *parameter)
         
         // Send a message and suspend the thread until transmission completes.
         NRF24_Send(NRF24_TX_Buf.data, NRF24_TX_Buf.len, RT_FALSE);
-        sem_sent.value = 0; // reset semaphore value
-        rt_sem_take(&sem_sent, RT_WAITING_FOREVER);
         
         // Enter RX_Mode and wait for 40 ms
         powerUpRx();
         rt_thread_delay(40);
     }
 }
-
+*/
 
 /*
  * Called by rt_application_init() in application.c
  */
 void NRF24_Init(void)
 {
-    rt_uint8_t gnd_addr[5] = {'g','r','o','n','d'};
+    rt_uint8_t gnd_addr[5] = {0x68,0x86,0x66,0x88,0x28};
+    
+    // initialize the "sem_sent" semaphore
+    if (rt_sem_init(&sem_sent, "sent", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
+        rt_kprintf("rt_sem_init error\n");
     
     // initialize the peripherals needed for comm
     Interface_Init();
@@ -103,10 +105,10 @@ void NRF24_Init(void)
 
     // clear interrupts
     SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR | NRF24_TX_DS | NRF24_MAX_RT);
-    setChannel(50);
+    setChannel(40);
     setPayloadSize(32);
     setTransmitAddress(gnd_addr, 5);
-    setRF(NRF24DataRate1Mbps, NRF24TransmitPower0dBm);
+    setRF(NRF24DataRate250kbps, NRF24TransmitPower0dBm);
     
     // flush FIFOs
     flushTx();
@@ -123,23 +125,26 @@ void NRF24_Init(void)
 void EXTI9_5_IRQHandler(void)
 {
     if (EXTI_GetITStatus(EXTI_Line5) == SET)
-    {
-        // Clear IT pending bits
-        EXTI_ClearITPendingBit(EXTI_Line5);
-        
+    {     
         // Update the radio status
         status = statusRead(); 
-        // Clear interrupts
-        SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR | NRF24_TX_DS | NRF24_MAX_RT);
         
         // if TX_DS or MAX_RT, relase sem_sent to notify radio_thread of transmission complete
-        if (!(status & NRF24_MAX_RT))
+        if (status & NRF24_MAX_RT)
         {
             flushTx();
+            // Clear interrupts
+            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_MAX_RT);
             rt_sem_release(&sem_sent);
         }
-        else if (!(status & NRF24_TX_DS))
-            rt_sem_release(&sem_sent);   
+        else if (status & NRF24_TX_DS) {
+            // Clear interrupts
+            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_TX_DS);
+            rt_sem_release(&sem_sent);  
+        }
+        
+        // Clear IT pending bits
+        EXTI_ClearITPendingBit(EXTI_Line5);
     }
 }
 
@@ -150,12 +155,12 @@ void EXTI9_5_IRQHandler(void)
  */
 static rt_uint8_t SPI_RW(rt_uint8_t byte)
 {
+    while (SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_TXE) == RESET);
+    
     SPI_I2S_SendData(SPI1, byte);
-    // wait for transmission to complete. Since the transmission and
-    // reception of 1 byte should be fast, just use a tight loop here.
-    while (!SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_TXE));
+
     // wait if the SPI bus is busy
-    while (SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_BSY));
+    while (SPI_I2S_GetFlagStatus(SPI1, SPI_I2S_FLAG_RXNE) == RESET);
     
     // return the data received
     return SPI_I2S_ReceiveData(NRF24_SPI_PORT);
@@ -168,30 +173,37 @@ static rt_uint8_t SPI_RW(rt_uint8_t byte)
 static rt_uint8_t SPI_ReadReg(rt_uint8_t reg)
 {
     rt_uint8_t val;
-    GPIO_ResetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS low
+    NRF24_CE_LOW();
+    NRF24_CSN_LOW();
+    //delayus(20);
     
     reg = (reg & NRF24_REGISTER_MASK) | NRF24_COMMAND_R_REGISTER;
     SPI_RW(reg);                     // select the register
     val = SPI_RW(NRF24_COMMAND_NOP); // send dummy byte to read
     
-    GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS high 
+    NRF24_CSN_HIGH();
+    delayus(2);
     return val;
 }
 
 
 /*
  * Write one byte to a selected register and return the status byte.
+ * To be used only with NRF24L01
  */
 static rt_uint8_t SPI_WriteReg(rt_uint8_t reg, rt_uint8_t byte)
 {
     rt_uint8_t status;
-    GPIO_ResetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS low
+    NRF24_CE_LOW();
+    NRF24_CSN_LOW();  // pull CS low
+   // delayus(20);
     
     reg = (reg & NRF24_REGISTER_MASK) | NRF24_COMMAND_W_REGISTER;
     status = SPI_RW(reg); // select register and read its status byte
     SPI_RW(byte);         // send byte to the selected register
-    
-    GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS high 
+
+    NRF24_CSN_HIGH();  // pull CS high 
+    delayus(2);
     return status;
 }
 
@@ -201,7 +213,9 @@ static rt_uint8_t SPI_WriteReg(rt_uint8_t reg, rt_uint8_t byte)
  */
 static void SPI_BurstRead(rt_uint8_t command, rt_uint8_t* buf, rt_uint8_t len)
 {
-    GPIO_ResetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS low
+    NRF24_CE_LOW();
+    NRF24_CSN_LOW();  // pull CS low
+    //delayus(20);
     
     SPI_RW(command);
     while(len--)
@@ -210,7 +224,8 @@ static void SPI_BurstRead(rt_uint8_t command, rt_uint8_t* buf, rt_uint8_t len)
         buf++;  // increase dest pointer
     }
     
-    GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS high 
+    NRF24_CSN_HIGH();  // pull CS high 
+    delayus(2);
 }
 
 
@@ -222,7 +237,9 @@ static void SPI_BurstRead(rt_uint8_t command, rt_uint8_t* buf, rt_uint8_t len)
  */
 static void SPI_BurstWrite(rt_uint8_t command, rt_uint8_t* src, rt_uint8_t len)
 {
-    GPIO_ResetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS low
+    NRF24_CE_LOW();
+    NRF24_CSN_LOW();  // pull CS low
+   // delayus(20);
     
     SPI_RW(command);
     // perform a sequence of len writes
@@ -232,7 +249,8 @@ static void SPI_BurstWrite(rt_uint8_t command, rt_uint8_t* src, rt_uint8_t len)
         src++;   // increase source pointer
     }
     
-    GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN);  // pull CS high
+    NRF24_CSN_HIGH();  // pull CS high
+    delayus(1);
 }
 
 
@@ -262,17 +280,19 @@ static void SPI_BurstWriteRegister(rt_uint8_t reg, rt_uint8_t *src,
 /*************************************************************************/
 
 /* Print out all the register values. Useful for debugging */
-static void printRegisters(void)
+void printRegisters(void)
 {
     rt_uint8_t registers[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
                                0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
                                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
                                0x1C, 0x1D};
     rt_uint8_t i;
+    rt_uint8_t stat;
                                
     for (i = 0; i < sizeof(registers); i++)
     {
-        rt_kprintf("Reg %x: %x\n", registers[i], SPI_ReadReg(registers[i]));
+        stat = SPI_ReadReg(registers[i]);
+        rt_kprintf("Reg %x: %x\n", registers[i], stat);
     }
 }
 
@@ -288,13 +308,19 @@ static rt_uint8_t statusRead(void)
 
 static void flushTx(void)
 {
+    NRF24_CSN_LOW();  // pull CS low
+    delayus(20);
     SPI_RW(NRF24_COMMAND_FLUSH_TX);
+    NRF24_CSN_HIGH();  // pull CS high 
 }
 
 
 static void flushRx(void)
 {
+    NRF24_CSN_LOW();  // pull CS low
+    delayus(20);
     SPI_RW(NRF24_COMMAND_FLUSH_RX);
+    NRF24_CSN_HIGH();  // pull CS high 
 }
 
 
@@ -350,7 +376,7 @@ static void setRF(rt_uint8_t data_rate, rt_uint8_t power)
 static void powerDown(void)
 {
     SPI_WriteReg(NRF24_REG_00_CONFIG, NRF24_DEFAULT_CONFIGURATION);
-    GPIO_ResetBits(NRF24_CE_PORT, NRF24_CE_PIN);
+    NRF24_CE_LOW();
 }
 
 
@@ -359,7 +385,7 @@ static void powerUpRx(void)
 {
     SPI_WriteReg(NRF24_REG_00_CONFIG, NRF24_DEFAULT_CONFIGURATION | 
                  NRF24_PWR_UP | NRF24_PRIM_RX);
-    GPIO_SetBits(NRF24_CE_PORT, NRF24_CE_PIN);
+    NRF24_CE_HIGH();
 }
 
 
@@ -367,10 +393,10 @@ static void powerUpRx(void)
 static void powerUpTx(void)
 {
     // Its the pulse high that puts us into TX mode
-    GPIO_ResetBits(NRF24_CE_PORT, NRF24_CE_PIN);
+    NRF24_CE_LOW();
     SPI_WriteReg(NRF24_REG_00_CONFIG, NRF24_DEFAULT_CONFIGURATION | 
                  NRF24_PWR_UP);
-    GPIO_SetBits(NRF24_CE_PORT, NRF24_CE_PIN);
+    NRF24_CE_HIGH();
 }
 
 /* 
@@ -381,21 +407,28 @@ static void powerUpTx(void)
  * mode after transmission is complete (since CE is kept high). Client may want to
  * manually switch the radio back to RX_MODE.
  *
- * Return value indicates whether the LAST transmission was successful or not
+ * The function will suspend the calling thread until the transmission is 
+ * complete. Return value is the transmission status.
  */
-rt_bool_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack)
+rt_uint8_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack)
 {
-    rt_bool_t last_success = !(!(statusRead() & NRF24_MAX_RT));
-    
-    powerUpTx();
-    
+    // clear interrupt bit if necessary
+    if (statusRead() & NRF24_MAX_RT)
+        SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_MAX_RT);
+    rt_thread_delay(1);
+    sem_sent.value = 0; // reset semaphore value
+
     // write the payload
     if (noack)
         SPI_BurstWrite(NRF24_COMMAND_W_TX_PAYLOAD_NOACK, data, len);
     else
         SPI_BurstWrite(NRF24_COMMAND_W_TX_PAYLOAD, data, len);
     
-    return last_success;
+    // wait until sending complete
+    powerUpTx();
+    rt_sem_take(&sem_sent, 500);
+    
+    return statusRead();
 }
 
 
@@ -459,19 +492,20 @@ static void SPI1_Configuration(void)
 	SPI_InitStruct.SPI_DataSize = SPI_DataSize_8b;
     // CPOL = 0 , CPHA = 1 for NRF24L01
 	SPI_InitStruct.SPI_CPOL = SPI_CPOL_Low;   
-	SPI_InitStruct.SPI_CPHA = SPI_CPHA_2Edge; 
+	SPI_InitStruct.SPI_CPHA = SPI_CPHA_1Edge; 
 	SPI_InitStruct.SPI_NSS = SPI_NSS_Soft;
-    // SPI frequency is APB2 frequency / 256 (TODO: may need to adjust)
+    // 84000kHz/256=328kHz < 400kHz
 	SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_256; 
     // data is transmitted MSB first
 	SPI_InitStruct.SPI_FirstBit = SPI_FirstBit_MSB;
-	
+	 SPI_Init(SPI1, &SPI_InitStruct);
+     
     // Enable SPI1.NSS as a GPIO
     SPI_SSOutputCmd(SPI1, ENABLE);
     // set the NSS management to internal and pull internal NSS high
     SPI_NSSInternalSoftwareConfig(SPI1, SPI_NSSInternalSoft_Set);
     
-    SPI_Init(SPI1, &SPI_InitStruct);
+    SPI_CalculateCRC(SPI1, DISABLE);
 	SPI_Cmd(SPI1, ENABLE); // enable SPI1
 }
 
@@ -495,7 +529,7 @@ static void GPIO_Configuration(void)
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
 	GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
-	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_NOPULL;
+	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_DOWN;
 	GPIO_Init(GPIOA, &GPIO_InitStruct);
 	
 	// connect SPI1 pins to SPI alternate function
@@ -512,14 +546,15 @@ static void GPIO_Configuration(void)
 	GPIO_Init(NRF24_CS_PORT, &GPIO_InitStruct);
 	
     // de-select slave initially
-	GPIO_SetBits(NRF24_CS_PORT, NRF24_CS_PIN);
+	NRF24_CSN_HIGH();
     
     // initialize the CE (chip enable) pin
     GPIO_InitStruct.GPIO_Pin = NRF24_CE_PIN;
+    GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_DOWN;
 	GPIO_Init(NRF24_CE_PORT, &GPIO_InitStruct);
     
     // default CE LOW
-    GPIO_ResetBits(NRF24_CE_PORT, NRF24_CE_PIN); 
+    NRF24_CE_LOW();
     
     // configure the IRQ pin to input mode
     GPIO_InitStruct.GPIO_Pin = NRF24_IRQ_PIN;
@@ -567,10 +602,10 @@ static void RCC_Configuration(void)
 {
 	// enable GPIOA clock
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOA, ENABLE);
-    // enable GPIOB clock
-    RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOB, ENABLE);
     // enable GPIOC clock
     RCC_AHB1PeriphClockCmd(RCC_AHB1Periph_GPIOC, ENABLE);
+    // configure APB2 prescaler
+   // RCC_PCLK2Config(RCC_HCLK_Div16);
     // enable SPI clock
 	RCC_APB2PeriphClockCmd(RCC_APB2Periph_SPI1, ENABLE);
     // enable SYSCFG clock so as to write to SYSCFG
@@ -588,4 +623,12 @@ static void Interface_Init(void)
     SPI1_Configuration();
     EXTI_Configuration();
     NVIC_Configuration();
+}
+
+static void delayus(unsigned long us) {
+    unsigned long i;
+    while(us--) {
+        i = 100;
+        while(i--);
+    }
 }

@@ -100,8 +100,8 @@ struct rt_device uart3_device;
 #define UART3_GPIO			GPIOB
 #define UART3_GPIO_RCC   	RCC_AHB1Periph_GPIOB
 #define RCC_APBPeriph_UART3	RCC_APB1Periph_USART3
-#define UART3_TX_DMA		DMA1_Stream1
-#define UART3_RX_DMA		DMA1_Stream3
+#define UART3_TX_DMA		DMA1_Stream3
+#define UART3_RX_DMA		DMA1_Stream1
 
 static void RCC_Configuration(void)
 {
@@ -109,7 +109,7 @@ static void RCC_Configuration(void)
 	/* Enable USART2 GPIO clocks */
 	RCC_AHB1PeriphClockCmd(UART1_GPIO_RCC, ENABLE);
 	/* Enable USART2 clock */
-	RCC_APB2PeriphClockCmd(RCC_APBPeriph_UART1, ENABLE);
+	RCC_APB2PeriphClockCmd(RCC_APB2Periph_USART1, ENABLE);
 #endif
 
 #ifdef RT_USING_UART2
@@ -230,7 +230,7 @@ static void DMA_Configuration(void)
 //  DMA_Init(DMA_STREAM, &DMA_InitStructure);
 
   /* Configure DMA Stream */
-  DMA_InitStructure.DMA_Channel = DMA_Channel_0;
+  DMA_InitStructure.DMA_Channel = DMA_Channel_4;
   DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)(&USART3->DR);
   DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)0;
   DMA_InitStructure.DMA_DIR = DMA_DIR_MemoryToPeripheral;
@@ -333,7 +333,7 @@ void rt_hw_usart_init()
 	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
 	USART_Init(USART3, &USART_InitStructure);
 
-//	uart3_dma_tx.dma_channel= UART3_TX_DMA;
+	uart3_dma_tx.dma_channel= UART3_TX_DMA;
 
 	/* register uart3 */
 	rt_hw_serial_register(&uart3_device, "uart3",
