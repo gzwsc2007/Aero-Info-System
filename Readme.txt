@@ -8,3 +8,5 @@ This is a self-project about developing an embedded system that can gather infor
     battery    <----->  Current/Voltage sensor
 
 This embedded system is based on the STM32F4-Discovery board, and the RT-Thread real-time OS.
+
+[2013-12] I decided to use the MAVLink Protocol when transmitting data back to the Ground Station. More Info about MAVLink can be found here: http://qgroundcontrol.org/mavlink/start
