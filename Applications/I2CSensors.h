@@ -1,10 +1,14 @@
 #ifndef _I2CSENSORS_H_
 #define  _I2CSENSORS_H_
 
-#define VBATT_SCALING_FACTOR  1.2 // TODO: change this to (R1 + R2) / R2
+#define MY_I2C_CLOCK_RATE  50000 // 50 kHz for now. Should increase in future.
 
-#define ADC_CHAN_VBATT      0 // ADC channel for measuring LiPo Batt voltage
-#define ADC_CHAN_VCURRENT   1 // ADC channel for measuring battery current
+// R1 = 17.71 kohm = 17710 ohm
+// R2 = 5017 ohm + 2161 ohm = 7178 ohm
+#define VBATT_SCALING_FACTOR 3.467261 //  (R1 + R2) / R2
+
+#define ADC_CHAN_VBATT      1 // ADC channel for measuring LiPo Batt voltage
+#define ADC_CHAN_VCURRENT   0 // ADC channel for measuring battery current
 #define ADC_CHAN_VAIRSPEED  2 // ADC channel for measruing airspeed sensor
 #define ADC_CHAN_VDD        3 // ADC channel for measuring the 5V power supply
 
@@ -110,6 +114,17 @@ typedef enum
   GAIN_SIXTEEN      = ADS1115_REG_CONFIG_PGA_0_256V
 } adsGain_t;
 
+// return battery current in Amps
+double getBattCurrent(void);
+
+// return battery voltage in volts
+double getBattVoltage(void);
+
+// reset the neutral point for airspeed voltage
+void calibrateAirspeed(void);
+
+/* return airspeed in m/s */
+double getAirspeed(void);
 
 /*
  * Responsible for converting voltage readings from multiple analog sensors,
@@ -160,6 +175,8 @@ adsGain_t ADS1115_getGain(void);
 float BMP085_presToAlt(rt_int32_t pres);
 
 /*
+ * main Interface function
+ *
  * Return the measured temperature and pressure into the pointers provided.
  * The unit of temp is in 0.1 Celcius and the unit for pres is in Pa.
  * 

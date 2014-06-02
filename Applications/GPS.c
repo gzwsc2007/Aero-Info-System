@@ -12,7 +12,6 @@
 #include "stm32f4xx.h"
 #include <rtthread.h>
 #include <string.h>
-#include "MAVlink_include/common/mavlink.h"
 #include "GPS.h"
 #include <inttypes.h>
 #include "Telemetry.h"
@@ -63,35 +62,6 @@ void USART1_IRQHandler()
         // Re-enable DMA
         DMA_Cmd(DMA2_Stream5, ENABLE);
     }
-}
-
-
-void GPS_fillMavlinkStruct(mavlink_gps_raw_int_t *m)
-{
-    if (GPS_struct_busy)
-        return;
-    else 
-        GPS_struct_busy = RT_TRUE;
-    
-    if (!GPS_Data.valid) 
-    {
-        m->fix_type = 0; // for me, 0: invalid data
-        GPS_struct_busy = RT_FALSE;
-        return;
-    }
-    
-    m->time_usec = (uint64_t)rt_tick_get() * (uint64_t)1000;
-    m->fix_type = 1; // 0-1: no fix. 
-    m->lat = GPS_Data.latitude;
-    m->lon = GPS_Data.longitude;
-    m->alt = 0; // gps alt not known
-    m->eph = 0xFFFF;
-    m->epv = 0xFFFF;
-    m->vel = GPS_Data.speed;
-    m->cog = GPS_Data.course;
-    m->satellites_visible = 0xFF; // unknown
-    
-    GPS_struct_busy = RT_FALSE;
 }
 
 
@@ -182,12 +152,18 @@ static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
 static rt_int32_t NMEA_convertLatLong(char *b) {
     char *tmp = strchr(b, '.'); // locate the '.' char
     double min;
+    int minDec;
     int deg;
     int result;
-     
+    
+    // convert the decimal portion of min
+    minDec = NMEA_atoi(tmp+1);
+    min = ((double)minDec) / 100000.0;
+    *tmp = '\0';
+        
     // convert minute into the form of mm.mmmm
     tmp = tmp - 2; // go back to the first 'm'
-    min = (double)NMEA_atoi(tmp);
+    min += (double)NMEA_atoi(tmp);
     
     // convert degree into a single integer
     *tmp = '\0'; // safe to modify b in this case
@@ -195,7 +171,7 @@ static rt_int32_t NMEA_convertLatLong(char *b) {
     
     // scaling
     result = deg * 10000000; // scale 1 deg to 10^-7 deg
-    min = (min / 600000.0) * 10000000.0; // convert minute to 10^-7 deg
+    min = (min / 60.0) * 10000000.0; // convert minute to 10^-7 deg
     
     result = result + (rt_int32_t)min;
     return result;

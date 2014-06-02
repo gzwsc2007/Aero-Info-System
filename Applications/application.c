@@ -75,7 +75,7 @@ int rt_application_init()
     rt_thread_startup(&BMP085_thread);
     
     // start the ADS1115 thread
-   /* rt_thread_init(
+   rt_thread_init(
                    &ADS1115_thread, 
                    "ADS1115", 
                    ADS1115_thread_entry, 
@@ -83,9 +83,9 @@ int rt_application_init()
                    ADS1115_thread_stack,
                    ADS1115_THREAD_STACK_SIZE, 
                    ADS1115_THREAD_PRIORITY, 
-                   10
+                   20
                   );
-    rt_thread_startup(&ADS1115_thread);*/
+    rt_thread_startup(&ADS1115_thread);
  
     // start the mavlink_thread
     rt_thread_init(

@@ -1,8 +1,6 @@
 #ifndef _GPS_H_
 #define _GPS_H_
 
-#include "MAVlink_include/common/mavlink.h"
-
 // USART Settings for receiving GPS Data 
 #define GPS_USART              USART1
 #define GPS_USART_BAUD_RATE    115200
@@ -37,6 +35,5 @@ extern GPS_Data_t  GPS_Data;
 
 void GPS_Init(void);
 
-void GPS_fillMavlinkStruct(mavlink_gps_raw_int_t *m);
 
 #endif

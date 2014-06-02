@@ -1,6 +1,6 @@
 #include "stm32f4xx.h"
 #include <rtthread.h>
-#include "MAVlink_include/common/mavlink.h"
+#include "MAVlink_include/aeroInfoSystem/mavlink.h"
 #include "MPU6050.h"
 #include "Telemetry.h"
 
@@ -60,26 +60,6 @@ void USART3_IRQHandler()
 }
 
 
-void MPU_fillMavlinkStruct(mavlink_attitude_t *m) 
-{
-    if (MPU_struct_busy)
-        return;
-    else
-        MPU_struct_busy = RT_TRUE;
-    
-    m->time_boot_ms = (rt_uint32_t)rt_tick_get();
-    m->roll = MPU_Data.roll;
-    m->pitch = MPU_Data.pitch;
-    m->yaw = MPU_Data.yaw;
-    m->rollspeed = MPU_Data.rollspeed;
-    m->pitchspeed = MPU_Data.pitchspeed;
-    m->yawspeed = MPU_Data.yawspeed;
-    
-    MPU_struct_busy = RT_FALSE;
-    return;
-}
-
-
 static rt_int8_t parse(rt_uint8_t *buf, MPU_Data_t *m)
 {
     // skip the accel packet
@@ -91,11 +71,11 @@ static rt_int8_t parse(rt_uint8_t *buf, MPU_Data_t *m)
         // angular vel packet
         if (buf[ptr++] == 0x52)
         {
-            m->rollspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0*DEG_TO_RAD;
+            m->rollspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0;
             ptr += 2;
-            m->pitchspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0*DEG_TO_RAD;
+            m->pitchspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0;
             ptr += 2;
-            m->yawspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0*DEG_TO_RAD;
+            m->yawspeed = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*2000.0;
             ptr += 2;
             m->temperature = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/340.0+36.25;
             ptr += 3;
@@ -109,11 +89,11 @@ static rt_int8_t parse(rt_uint8_t *buf, MPU_Data_t *m)
         // angle packet
         if (buf[ptr++] == 0x53)
         {
-            m->roll = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180.0*DEG_TO_RAD;
+            m->roll = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180;
             ptr += 2;
-            m->pitch = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180.0*DEG_TO_RAD;
+            m->pitch = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180;
             ptr += 2;
-            m->yaw = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180.0*DEG_TO_RAD;
+            m->yaw = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/32768.0*180;
             ptr += 2;
             m->temperature = ((rt_int16_t)(buf[ptr+1]<<8| buf[ptr]))/340.0+36.25;
             ptr += 3;
@@ -166,7 +146,7 @@ void MPU6050_Init(void)
     USART_InitStructure.USART_StopBits = USART_StopBits_1;
     USART_InitStructure.USART_Parity = USART_Parity_No;  // No Parity check
     USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
-    USART_InitStructure.USART_Mode = USART_Mode_Rx;  // For receiving only
+    USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
     USART_Init(MPU_USART, &USART_InitStructure);
     
     // detect idle line and cause an interrupt in which the MPU data is parsed
@@ -174,6 +154,14 @@ void MPU6050_Init(void)
     USART_ITConfig(MPU_USART, USART_IT_RXNE, DISABLE);
     
     USART_Cmd(MPU_USART, ENABLE);
+    
+    /* make sure the Module is in Serial mode (not I2C mode)
+    while(USART_GetFlagStatus(MPU_USART, USART_FLAG_TXE) == RESET);
+    USART_SendData(MPU_USART, 0x61);
+    while(USART_GetFlagStatus(MPU_USART, USART_FLAG_TXE) == RESET);
+    USART_SendData(MPU_USART, 0x63);
+    while(USART_GetFlagStatus(MPU_USART, USART_FLAG_TXE) == RESET);*/
+               
     
     /* DMA Configuration */
     

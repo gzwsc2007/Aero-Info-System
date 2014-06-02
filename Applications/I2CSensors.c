@@ -18,7 +18,10 @@
 #include <math.h>
 
 /* Private Helper Function Declarations */
-   
+
+// ADS1115 ADC util functions
+static void ADS1115_Init(void);
+
 // BMP085 altimeter util functions
 static rt_uint16_t BMP085_readRawTemp(void);
 static rt_uint32_t BMP085_readRawPres(void);
@@ -58,6 +61,16 @@ static void I2C_stop(I2C_TypeDef* I2Cx);
 static adsGain_t PGA_gain = GAIN_ONE; // default gain
 static double fullscale = 4.096; // default gain
 struct rt_semaphore sem_adc;  // used to wait for conversion to complete
+static double Vdd;
+static double Vbatt;
+
+// current sensing
+static double Vcurr;
+
+// airspeed readings
+static double Vairspeed;
+static double Vaspd_neutral;
+static double Vaspd_factor;
 
 // BMP085 altimeter
 static rt_int16_t ac1, ac2, ac3, b1, b2, mb, mc, md;  // calibration values
@@ -89,17 +102,26 @@ static rt_int16_t magX, magY, magZ; // raw data measured by HMC5883
 void ADS1115_thread_entry(void *param)
 {
     rt_uint16_t cnt = 0;
+    rt_uint8_t subCnt = 0;
+    double prevAspd = 0;
     
     if (rt_sem_init(&sem_adc, "sem_adc", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
         rt_kprintf("rt_sem_init error\n");
     
+    calibrateAirspeed();
+    
+    rt_thread_delay(10000);
+    
+    ADS1115_setGain(GAIN_TWOTHIRDS);
+    
     // measure the 5V supply voltage so that I can determine the midpoint of 
     // many analog sensors.
-    double Vdd = ((double)ADS1115_readSingleEnded(ADC_CHAN_VDD)) * fullscale /
-                 (double)(0x7FFF);
-    double Vbatt;
-    double Vcurr;
-    double Vairspeed;
+    Vdd = ((double)ADS1115_readSingleEnded(ADC_CHAN_VDD)) * fullscale /
+           (double)(0x7FFF);
+    
+    // find neutral positions for airspeed
+    calibrateAirspeed();
+    prevAspd = Vaspd_neutral;
     
     while(1)
     {
@@ -109,23 +131,85 @@ void ADS1115_thread_entry(void *param)
         
         Vairspeed = ((double)ADS1115_readSingleEnded(ADC_CHAN_VAIRSPEED)) * 
                     fullscale / (double)(0x7FFF);
-              
+        
+        Vairspeed = prevAspd * 0.85 + (Vairspeed * 0.15);
+        prevAspd = Vairspeed;
+        //rt_kprintf("%d km/h\n", (rt_int32_t)(getAirspeed() * 3.6));
+        //rt_kprintf("%d pa\n", (rt_int32_t)((Vairspeed - Vaspd_neutral)*1000.0/(0.2*Vdd)));
+        
         // Vbatt updated at about 5 Hz
         if (cnt >= 6) {
             cnt = 0;
+            
             Vbatt = ((double)ADS1115_readSingleEnded(ADC_CHAN_VBATT)) * 
                     fullscale / (double)(0x7FFF);
-            Vbatt *= VBATT_SCALING_FACTOR;
             
+          //  rt_kprintf(" Vcurr = %d\n", (rt_int32_t)(Vcurr*1000.0));
+          //  rt_kprintf("       Vdd = %d\n", (rt_int32_t)(Vdd*1000.0));
+          //  rt_kprintf("                 Vbatt = %d\n", (rt_int32_t)(Vbatt*1000.0));
+            
+            
+            subCnt++;
+            
+            if (subCnt >= 10) {
+                subCnt = 0;
+                
+                Vdd = ((double)ADS1115_readSingleEnded(ADC_CHAN_VDD)) * fullscale /
+               (double)(0x7FFF);
+               
+                Vaspd_factor = 2000.0 / (0.2 * Vdd) / 1.15; // 1.15 kg/m^3 at 30 celcius
+            }
             // given the extra time converting Vbatt, just skip the delay.
             continue;
         }              
         
         cnt++;
-        rt_thread_delay(15);
+        rt_thread_delay(30);
     }
 }
 
+// return battery voltage in V
+double getBattVoltage(void)
+{
+    return Vbatt * VBATT_SCALING_FACTOR;
+}
+
+// return battery current in Amps
+double getBattCurrent(void)
+{
+    double deltaV = Vcurr - 2.5;
+    
+    if (deltaV > 0) return deltaV / 0.04; // sensitivity is 40mV / A
+    else return 0.0;
+}
+
+void calibrateAirspeed(void)
+{
+    double v = ((double)ADS1115_readSingleEnded(ADC_CHAN_VAIRSPEED)) * 
+             fullscale / (double)(0x7FFF);
+    double tempV;
+    
+    // take the average reading
+    for (rt_uint8_t i = 0; i < 200; i++) {
+        tempV = ((double)ADS1115_readSingleEnded(ADC_CHAN_VAIRSPEED)) * 
+                 fullscale / (double)(0x7FFF);
+        v = 0.1 * tempV + 0.9 * v;
+    }
+    
+    Vaspd_neutral = v - 0.005;
+    Vaspd_factor = 2000.0 / (0.2 * Vdd) / 1.15; // 1.15 kg/m^3 at 30 celcius
+    
+}
+
+// return airspeed in m/s
+double getAirspeed(void)
+{    
+    if (Vairspeed > Vaspd_neutral) 
+        return sqrt((Vairspeed - Vaspd_neutral)*Vaspd_factor);
+    else 
+        return -sqrt((Vaspd_neutral - Vairspeed)*Vaspd_factor);
+    
+}
 
 /*
  * Responsible for gathering data from the BMP085 barometer constantly, and 
@@ -139,35 +223,40 @@ void ADS1115_thread_entry(void *param)
 void BMP085_thread_entry(void *parameters)
 {
     rt_uint8_t cnt = 20;
-    
+    rt_base_t level;
     rwlock_init(&baroLock);
     
     // initialize the ground level pressure
-    rwlock_wrlock(&baroLock);
+    temperature = BMP085_getTemperature();
     press_ref = BMP085_getPressure();
-    rwlock_wrunlock(&baroLock);
+    press_ref += BMP085_getPressure(); 
+    press_ref += BMP085_getPressure();
+    press_ref += BMP085_getPressure(); // measure several times
+    press_ref = press_ref / 4; // and take the average
     
-    // the loop is running at about 50 Hz
+    rt_kprintf("BMP085 pressure ref: %d\n", press_ref);
+    
+    // the loop is running at about 18 Hz
     while (1)
     {
-        // update temperature reading rate about 1 Hz
-        if (cnt >= 20)
+        // update temperature reading rate about 5 Hz
+        if (cnt >= 5)
         {
             cnt = 0;
-            rwlock_wrlock(&baroLock);
+            //rwlock_wrlock(&baroLock);
             temperature = BMP085_getTemperature();
-            rwlock_wrunlock(&baroLock);
+            //rwlock_wrunlock(&baroLock);
         }
         
         // take the pressure reading
-        rwlock_wrlock(&baroLock);
+       // rwlock_wrlock(&baroLock);
         pressure = BMP085_getPressure();
-        rwlock_wrunlock(&baroLock);
+       // rwlock_wrunlock(&baroLock);
         
         // might want to calculate altitude here
         
         cnt++;
-        rt_thread_delay(45); // delay for almost 50 ms
+        rt_thread_delay(25); 
         
         // ignore this line for now
        // HMC5883_updateXZY();
@@ -183,12 +272,25 @@ void I2CSensors_Init(void)
     EXTI_Configuration();
     NVIC_Configuration();
     
+    ADS1115_Init();
     BMP085_Init();
-    if (!HMC5883_Init())
-        rt_kprintf("HMC5883L Init failed\n");
+    //if (!HMC5883_Init())
+    //    rt_kprintf("HMC5883L Init failed\n");
 }
 
 /*********** ADS1115 ADC **********************/
+
+/* Default gain set to one. Disable Comparator. Use RDY pin for conversion ready */
+static void ADS1115_Init()
+{
+    rt_uint16_t hi_thresh_val = 0x8000;
+    rt_uint16_t lo_thresh_val = 0x0000;
+    
+    ADS1115_setGain(GAIN_TWOTHIRDS); // need to first measure Vdd
+    
+    I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_LOWTHRESH, lo_thresh_val);
+    I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_HITHRESH, hi_thresh_val);
+}
 
 /*
  * Read the converted voltage from a designated channel in the ADS1115.
@@ -200,7 +302,7 @@ rt_int16_t ADS1115_readSingleEnded(rt_uint8_t channel) {
         return 0;
     
     // set up default config values
-    config = ADS1115_REG_CONFIG_CQUE_NONE    | // Disable the comparator (default val)
+    config = ADS1115_REG_CONFIG_CQUE_1CONV    | // Disable the comparator (default val)
              ADS1115_REG_CONFIG_CLAT_NONLAT  | // Non-latching (default val)
              ADS1115_REG_CONFIG_CPOL_ACTVLOW | // Alert/Rdy active low   (default val)
              ADS1115_REG_CONFIG_CMODE_TRAD   | // Traditional comparator (default val)
@@ -229,15 +331,15 @@ rt_int16_t ADS1115_readSingleEnded(rt_uint8_t channel) {
     // Set the "start single-conversion" bit
     config |= ADS1115_REG_CONFIG_OS_SINGLE;
     
+    sem_adc.value = 0;
     // Apply the config and start the conversion immediately
     I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_CONFIG, config);
     
     // suspend the calling thread until conversion is ready. sem_adc will be
     // released as soon as the RDY pin is pulled low and an interrupt is 
     // triggered.
-    sem_adc.value = 0;
-    rt_sem_take(&sem_adc, RT_WAITING_FOREVER);
-    
+    rt_sem_take(&sem_adc, 5);
+
     return (rt_int16_t)I2C_readTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_CONVERT);
 }
 
@@ -334,10 +436,10 @@ void BMP085_Init(void)
  */
 void BMP085_getTempAndPres(rt_int16_t *temp, rt_int32_t *pres)
 {
-    rwlock_rdlock(&baroLock);
-    *temp = temperature;
-    *pres = pressure;
-    rwlock_rdunlock(&baroLock);
+    //rwlock_rdlock(&baroLock);
+    if(temp != RT_NULL) *temp = temperature;
+    if(pres != RT_NULL) *pres = pressure;
+   // rwlock_rdunlock(&baroLock);
 }
 
 
@@ -650,15 +752,28 @@ static rt_uint8_t I2C_read_ack(I2C_TypeDef* I2Cx)
  */
 static rt_uint8_t I2C_read_nack(I2C_TypeDef* I2Cx)
 {
+    rt_base_t level;
+    rt_uint8_t result;
+    
+    // Note: access of the I2C bus here is protected by shutting down
+    // the IRQs and the scheduler, so that the accessing process
+    // will not be interrupted. Bad things happen if I don't do this.
+    // (Inspired by AN2824 from ST)
+    level = rt_hw_interrupt_disable();
+    
 	// disabe acknowledge of received data
 	// nack also generates stop condition after last byte received
-	// see reference manual for more info
+	// see reference manual for more info        
 	I2C_AcknowledgeConfig(I2Cx, DISABLE);
 	I2C_GenerateSTOP(I2Cx, ENABLE);
+
 	// wait until one byte has been received
 	while( !I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_RECEIVED) );
 	// read data from I2C data register and return data byte
-	return (rt_uint8_t) I2C_ReceiveData(I2Cx);
+	result = (rt_uint8_t) I2C_ReceiveData(I2Cx);
+    
+    rt_hw_interrupt_enable(level);
+    return result;
 }
 
 
@@ -720,7 +835,7 @@ static void GPIO_Configuration(void)
     // configure pins used by I2C1
 	GPIO_InitStruct.GPIO_Pin = GPIO_Pin_8 | GPIO_Pin_9;
 	GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
-	GPIO_InitStruct.GPIO_OType = GPIO_OType_OD;
+	GPIO_InitStruct.GPIO_OType = GPIO_OType_OD; // GPIO set to open-drain
 	GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_InitStruct.GPIO_PuPd = GPIO_PuPd_UP;
 	GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -742,7 +857,7 @@ static void I2C1_Configuration(void)
 	I2C_InitTypeDef I2C_InitStruct;
     
     // configure I2C1 
-	I2C_InitStruct.I2C_ClockSpeed = 100000; 		// 100kHz
+	I2C_InitStruct.I2C_ClockSpeed = MY_I2C_CLOCK_RATE; 		// 10kHz
 	I2C_InitStruct.I2C_Mode = I2C_Mode_I2C;			// I2C mode
 	I2C_InitStruct.I2C_DutyCycle = I2C_DutyCycle_2;	// 50% duty cycle --> standard
 	I2C_InitStruct.I2C_OwnAddress1 = 0x00;			// own address, not relevant in master mode

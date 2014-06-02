@@ -1,5 +1,5 @@
 /** @file
- *	@brief MAVLink comm protocol built from common.xml
+ *	@brief MAVLink comm protocol built from aeroInfoSystem.xml
  *	@see http://pixhawk.ethz.ch/software/mavlink
  */
 #ifndef MAVLINK_H
@@ -22,6 +22,6 @@
 #endif
 
 #include "version.h"
-#include "common.h"
+#include "aeroInfoSystem.h"
 
 #endif // MAVLINK_H
