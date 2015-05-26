@@ -11,6 +11,7 @@
 #include "stm32f4xx.h"
 #include <rtthread.h>
 #include "NRF24L01.h"
+#include "finsh.h"
 
 /* Public global variables */
 struct NRF24_Buf_Struct NRF24_RX_Buf;
@@ -50,7 +51,7 @@ static void SPI_BurstWriteRegister(rt_uint8_t reg, rt_uint8_t *src,
 static void Interface_Init(void);
 static void delayus(unsigned long);
 
-
+static volatile rt_bool_t txe = RT_TRUE;
 
 /* TODO: This might not be a good idea for MAVlink implementation
  * The Radio_Thread, responsible for transmitting and receiving message at a constant
@@ -58,6 +59,10 @@ static void delayus(unsigned long);
  */
 void radio_thread_entry(void *parameter)
 {
+    rt_uint32_t cnt = 0;
+    rt_uint8_t ack_payload[] = {'d','e','a','d','\0'};
+    rt_bool_t more = RT_FALSE;
+    
     // initialize the "sem_sent" semaphore
     /*
     if (rt_sem_init(&sem_sent, "sent", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
@@ -68,6 +73,7 @@ void radio_thread_entry(void *parameter)
         rt_kprintf("rt_mutex_init error\n");
     */
     powerUpRx();
+    
     // main loop: propagate message to ground station about every 40 ms
     while(1)
     {
@@ -87,17 +93,29 @@ void radio_thread_entry(void *parameter)
         rt_thread_delay(40);
         */
         NRF24_CE_HIGH();
-        rt_sem_take(&sem_rx, 10000);
-        NRF24_CE_LOW();
-        printRegisters();
-        if (NRF24_Recv(NRF24_RX_Buf.data, &(NRF24_RX_Buf.len)) == RT_TRUE)
-        {
-            // broadcast an event
-            rt_kprintf("%s\n",NRF24_RX_Buf.data);
+        if (rt_sem_take(&sem_rx, 5000) != -RT_ETIMEOUT) {
+          NRF24_CE_LOW();
+          while (NRF24_Recv(NRF24_RX_Buf.data, &(NRF24_RX_Buf.len), &more) == RT_TRUE)
+          {
+              // broadcast an event
+              rt_kprintf("%s\t%d\n",NRF24_RX_Buf.data, cnt++);
+              
+              // Put an ACK payload
+   
+              SPI_BurstWrite(NRF24_COMMAND_W_ACK_PAYLOAD, ack_payload, sizeof(ack_payload));
+              
+              if (!more) {
+                  if (!(SPI_ReadReg(NRF24_REG_17_FIFO_STATUS) & NRF24_FIFO_RX_EMPTY)) {
+                      printf("Shit!\r\n");
+                  }
+                  break;
+              }
+          }
+        } else {
+            printRegisters();
         }
     }
 }
-
 
 /*
  * Called by rt_application_init() in application.c
@@ -126,7 +144,8 @@ void NRF24_Init(void)
     setTransmitAddress(this_addr, 5);
     //setThisAddress(this_addr,5);
     setRF(NRF24DataRate250kbps, NRF24TransmitPower0dBm);
-    SPI_WriteReg(NRF24_REG_1D_FEATURE, NRF24_EN_DPL);
+    
+    SPI_WriteReg(NRF24_REG_1D_FEATURE, NRF24_EN_DPL | NRF24_EN_ACK_PAY); // Enable DPL and ACK payload
     SPI_WriteReg(NRF24_REG_1C_DYNPD, NRF24_DPL_P0);
     
     // flush FIFOs
@@ -151,20 +170,20 @@ void EXTI9_5_IRQHandler(void)
         // if TX_DS or MAX_RT, relase sem_sent to notify radio_thread of transmission complete
         if (status & NRF24_MAX_RT)
         {
-            flushTx();
-            // Clear interrupts
-            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_MAX_RT);
-            rt_sem_release(&sem_sent);
+//            flushTx();
+//            rt_sem_release(&sem_sent);
         }
         else if (status & NRF24_TX_DS) {
-            // Clear interrupts
-            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_TX_DS);
-            rt_sem_release(&sem_sent);  
-        } else if (status & NRF24_RX_DR) {
-            // Clear interrupts
-            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR);
+            txe = RT_TRUE;
+ //           rt_sem_release(&sem_sent);  
+        }
+        
+        if (status & NRF24_RX_DR) { // Oh man this should be a separate IF (not ELSE IF) !!!
             rt_sem_release(&sem_rx);
         }
+        
+        // Clear interrupts
+        SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR | NRF24_TX_DS | NRF24_MAX_RT);
         
         // Clear IT pending bits
         EXTI_ClearITPendingBit(EXTI_Line5);
@@ -318,6 +337,7 @@ void printRegisters(void)
         rt_kprintf("Reg %x: %x\n", registers[i], stat);
     }
 }
+FINSH_FUNCTION_EXPORT(printRegisters, "NRF24 REG");
 
 /* 
  * Read the status of the radio. 
@@ -489,9 +509,9 @@ rt_uint8_t NRF24_get_payload_len(void)
  *
  * Return RT_TRUE if a payload is copied into buf, and RT_FALSE otherwise.
  */
-rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len)
+rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len, rt_bool_t *more)
 {
-    if (!(status & NRF24_RX_DR))
+    if (!*more && !(status & NRF24_RX_DR))
         return RT_FALSE;
     
     *len = NRF24_get_payload_len();
@@ -499,6 +519,16 @@ rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len)
       SPI_BurstRead(NRF24_COMMAND_R_RX_PAYLOAD, buf, *len);
     } else {
         return RT_FALSE;
+    }
+    
+    rt_thread_delay(1);
+    
+    // Check if there is more data to read
+    rt_uint8_t fifo_stat = SPI_ReadReg(NRF24_REG_17_FIFO_STATUS);
+    if (fifo_stat & NRF24_FIFO_RX_EMPTY) {
+      *more = RT_FALSE;
+    } else {
+        *more = RT_TRUE;
     }
     
     return RT_TRUE;

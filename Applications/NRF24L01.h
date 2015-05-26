@@ -238,7 +238,7 @@ rt_uint8_t NRF24_Send(rt_uint8_t *data, rt_uint8_t len, rt_bool_t noack);
  *
  * Return RT_TRUE if a payload is copied into buf, and RT_FALSE otherwise.
  */
-rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len);
+rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len, rt_bool_t *more);
 
 
 void printRegisters(void);
