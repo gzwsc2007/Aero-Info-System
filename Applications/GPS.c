@@ -54,7 +54,7 @@ void USART1_IRQHandler()
         {
             GPS_buf[temp] = '\0';
             GPS_parse(GPS_buf, &GPS_Data); 
-            rt_event_send(&event_drdy, EVENT_GPS_DATA_RDY);
+           // rt_event_send(&event_drdy, EVENT_GPS_DATA_RDY);
         }
         
         // Reset the DMA data counter
@@ -135,11 +135,11 @@ static void GPRMC_interp_block(char* b, rt_int8_t i, GPS_Data_t* g)
         // Ground speed
         case 7:
             temp = NMEA_atoi(b);
-            g->speed = (rt_uint16_t)(temp * 643 / 125); // convert 1 knot to 0.01 m/s
+            g->speed = (rt_uint16_t)(temp * 643 / 12500); // convert 1 knot to 0.01 m/s
             break;
         // Course
         case 8:
-            g->course = (rt_uint16_t)NMEA_atoi(b) * 10;
+            g->course = (rt_uint16_t)NMEA_atoi(b);
             break;
     }
 }

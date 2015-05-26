@@ -21,6 +21,7 @@ struct rt_mutex NRF24_TX_Lock;  // mutex lock for the TX buffer
 /* Private global variables */
 volatile static rt_uint8_t status;  // status of the NRF24L01 radio
 struct rt_semaphore sem_sent;  // used to wait for transmission to complete
+struct rt_semaphore sem_rx;
 
 /* NRF24L01 util functions */
 //void printRegisters(void); // moved to .h file
@@ -54,20 +55,23 @@ static void delayus(unsigned long);
 /* TODO: This might not be a good idea for MAVlink implementation
  * The Radio_Thread, responsible for transmitting and receiving message at a constant
  * period (about 25 times per second).
- 
+ */
 void radio_thread_entry(void *parameter)
 {
     // initialize the "sem_sent" semaphore
+    /*
     if (rt_sem_init(&sem_sent, "sent", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
         rt_kprintf("rt_sem_init error\n");
     if (rt_mutex_init(&NRF24_RX_Lock, "RX_Lock", RT_IPC_FLAG_FIFO) != RT_EOK)
         rt_kprintf("rt_mutex_init error\n");
     if (rt_mutex_init(&NRF24_TX_Lock, "TX_Lock", RT_IPC_FLAG_FIFO) != RT_EOK)
         rt_kprintf("rt_mutex_init error\n");
-    
+    */
+    powerUpRx();
     // main loop: propagate message to ground station about every 40 ms
     while(1)
     {
+        /*
         rt_mutex_take(&NRF24_RX_Lock, RT_WAITING_FOREVER); 
         // check if there is any available message received
         if (NRF24_Recv(NRF24_RX_Buf.data, &(NRF24_RX_Buf.len)) == RT_TRUE)
@@ -80,21 +84,33 @@ void radio_thread_entry(void *parameter)
         NRF24_Send(NRF24_TX_Buf.data, NRF24_TX_Buf.len, RT_FALSE);
         
         // Enter RX_Mode and wait for 40 ms
-        powerUpRx();
         rt_thread_delay(40);
+        */
+        NRF24_CE_HIGH();
+        rt_sem_take(&sem_rx, 10000);
+        NRF24_CE_LOW();
+        printRegisters();
+        if (NRF24_Recv(NRF24_RX_Buf.data, &(NRF24_RX_Buf.len)) == RT_TRUE)
+        {
+            // broadcast an event
+            rt_kprintf("%s\n",NRF24_RX_Buf.data);
+        }
     }
 }
-*/
+
 
 /*
  * Called by rt_application_init() in application.c
  */
 void NRF24_Init(void)
 {
-    rt_uint8_t gnd_addr[5] = {0x68,0x86,0x66,0x88,0x28};
+    static rt_uint8_t other_addr[5] = {0xDE,0xAD,0xBE,0xEF,0x42};
+    static rt_uint8_t this_addr[5] = {0x68,0x86,0x66,0x88,0x28};
     
     // initialize the "sem_sent" semaphore
     if (rt_sem_init(&sem_sent, "sent", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
+        rt_kprintf("rt_sem_init error\n");
+    if (rt_sem_init(&sem_rx, "rx", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
         rt_kprintf("rt_sem_init error\n");
     
     // initialize the peripherals needed for comm
@@ -106,9 +122,12 @@ void NRF24_Init(void)
     // clear interrupts
     SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR | NRF24_TX_DS | NRF24_MAX_RT);
     setChannel(40);
-    setPayloadSize(32);
-    setTransmitAddress(gnd_addr, 5);
+//    setPayloadSize(32);
+    setTransmitAddress(this_addr, 5);
+    //setThisAddress(this_addr,5);
     setRF(NRF24DataRate250kbps, NRF24TransmitPower0dBm);
+    SPI_WriteReg(NRF24_REG_1D_FEATURE, NRF24_EN_DPL);
+    SPI_WriteReg(NRF24_REG_1C_DYNPD, NRF24_DPL_P0);
     
     // flush FIFOs
     flushTx();
@@ -141,6 +160,10 @@ void EXTI9_5_IRQHandler(void)
             // Clear interrupts
             SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_TX_DS);
             rt_sem_release(&sem_sent);  
+        } else if (status & NRF24_RX_DR) {
+            // Clear interrupts
+            SPI_WriteReg(NRF24_REG_07_STATUS, NRF24_RX_DR);
+            rt_sem_release(&sem_rx);
         }
         
         // Clear IT pending bits
@@ -440,7 +463,8 @@ static rt_bool_t available(void)
     if (SPI_ReadReg(NRF24_REG_17_FIFO_STATUS) & NRF24_FIFO_RX_EMPTY)
         return RT_FALSE;
     // Manual says that messages > 32 octets should be discarded
-    if (SPI_RW(NRF24_COMMAND_R_RX_PL_WID) > 32)
+    SPI_RW(NRF24_COMMAND_R_RX_PL_WID); // TODO: this is BUGGY!!
+    if (SPI_RW(NRF24_COMMAND_NOP) > 32)
     {
         flushRx();
         return RT_FALSE;
@@ -449,6 +473,12 @@ static rt_bool_t available(void)
     return RT_TRUE;
 }
 
+rt_uint8_t NRF24_get_payload_len(void)
+{
+    rt_uint8_t len = 0;
+    SPI_BurstRead(NRF24_COMMAND_R_RX_PL_WID, &len, sizeof(len));
+    return len;
+}
 
 /*
  * Check if there is a valid payload in the RX_FIFO of the radio. If yes, copy it
@@ -464,14 +494,14 @@ rt_bool_t NRF24_Recv(rt_uint8_t *buf, rt_uint8_t *len)
     if (!(status & NRF24_RX_DR))
         return RT_FALSE;
     
-    if (available()) 
-    {
-        *len = SPI_RW(NRF24_COMMAND_R_RX_PL_WID);
-        SPI_BurstRead(NRF24_COMMAND_R_RX_PAYLOAD, buf, *len);
-        return RT_TRUE;
-    }
-    else
+    *len = NRF24_get_payload_len();
+    if (*len <= 32) {
+      SPI_BurstRead(NRF24_COMMAND_R_RX_PAYLOAD, buf, *len);
+    } else {
         return RT_FALSE;
+    }
+    
+    return RT_TRUE;
 }
 
 /******************************************************************************/

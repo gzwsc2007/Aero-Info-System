@@ -333,7 +333,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>1</Optim>
+            <Optim>2</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>0</OneElfS>
@@ -399,6 +399,26 @@
               <FileName>rtconfig.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Applications\rtconfig.h</FilePath>
+            </File>
+            <File>
+              <FileName>GPS.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Applications\GPS.c</FilePath>
+            </File>
+            <File>
+              <FileName>NRF24L01.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Applications\NRF24L01.c</FilePath>
+            </File>
+            <File>
+              <FileName>I2CSensors.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Applications\I2CSensors.c</FilePath>
+            </File>
+            <File>
+              <FileName>Telemetry.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Applications\Telemetry.c</FilePath>
             </File>
           </Files>
         </Group>

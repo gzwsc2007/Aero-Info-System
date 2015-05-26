@@ -31,21 +31,29 @@
 
 // stack size for the mavlink thread
 #define MAVLINK_THREAD_STACK_SIZE     2048
-// priority for the radio_thread
+// priority for the mavlink thread
 #define MAVLINK_THREAD_PRIORITY       16
+     
+// stack size for the radio thread
+#define RADIO_THREAD_STACK_SIZE     2048
+// priority for the radio_thread
+#define RADIO_THREAD_PRIORITY       15
 
 // stack size for the BMP085_thread
-#define BMP085_THREAD_STACK_SIZE     512
+#define BMP085_THREAD_STACK_SIZE     1024
 // priority for the BMP085_thread
 #define BMP085_THREAD_PRIORITY       16
 
 // stack size for the ADS1115 thread
-#define ADS1115_THREAD_STACK_SIZE    512
+#define ADS1115_THREAD_STACK_SIZE    1024
 // priority for the ADS1115 thread
 #define ADS1115_THREAD_PRIORITY      16
      
 static rt_uint8_t mavlink_thread_stack[MAVLINK_THREAD_STACK_SIZE]; 
 static struct rt_thread mavlink_thread;
+
+static rt_uint8_t radio_thread_stack[RADIO_THREAD_STACK_SIZE]; 
+static struct rt_thread radio_thread;
 
 static rt_uint8_t BMP085_thread_stack[BMP085_THREAD_STACK_SIZE]; 
 static struct rt_thread BMP085_thread;
@@ -56,13 +64,13 @@ static struct rt_thread ADS1115_thread;
 
 int rt_application_init()
 {
-    GPS_Init();
+//    GPS_Init();
     NRF24_Init();
-    I2CSensors_Init();
-    MPU6050_Init();
+//    I2CSensors_Init();
+//    MPU6050_Init();
     
     // start the BMP085_thread
-    rt_thread_init(
+/*    rt_thread_init(
                    &BMP085_thread, 
                    "BMP085", 
                    BMP085_thread_entry, 
@@ -85,7 +93,7 @@ int rt_application_init()
                    ADS1115_THREAD_PRIORITY, 
                    20
                   );
-    rt_thread_startup(&ADS1115_thread);
+    rt_thread_startup(&ADS1115_thread); 
  
     // start the mavlink_thread
     rt_thread_init(
@@ -98,8 +106,20 @@ int rt_application_init()
                    MAVLINK_THREAD_PRIORITY, 
                    10
                   );
-    rt_thread_startup(&mavlink_thread);
+    rt_thread_startup(&mavlink_thread); */
     
+    rt_thread_init(
+                   &radio_thread, 
+                   "nrf24", 
+                   radio_thread_entry, 
+                   RT_NULL, 
+                   radio_thread_stack,
+                   RADIO_THREAD_STACK_SIZE, 
+                   RADIO_THREAD_PRIORITY, 
+                   20
+                  );
+    rt_thread_startup(&radio_thread);
+        
     return 0;
 }
 

@@ -9,24 +9,26 @@ typedef struct __mavlink_pfd_t
  int16_t yaw; ///< Yaw angle (magnetic heading) in 0.01 degrees. Positive means yawing CW. 
  int16_t altitude; ///< altitude (AGL) in meters. 
  int16_t airspeed; ///< airspeed in 0.1 m/s. 
+ int16_t battI; ///< Battery current in 0.01 A. 
 } mavlink_pfd_t;
 
-#define MAVLINK_MSG_ID_PFD_LEN 10
-#define MAVLINK_MSG_ID_150_LEN 10
+#define MAVLINK_MSG_ID_PFD_LEN 12
+#define MAVLINK_MSG_ID_150_LEN 12
 
-#define MAVLINK_MSG_ID_PFD_CRC 21
-#define MAVLINK_MSG_ID_150_CRC 21
+#define MAVLINK_MSG_ID_PFD_CRC 6
+#define MAVLINK_MSG_ID_150_CRC 6
 
 
 
 #define MAVLINK_MESSAGE_INFO_PFD { \
 	"PFD", \
-	5, \
+	6, \
 	{  { "roll", NULL, MAVLINK_TYPE_INT16_T, 0, 0, offsetof(mavlink_pfd_t, roll) }, \
          { "pitch", NULL, MAVLINK_TYPE_INT16_T, 0, 2, offsetof(mavlink_pfd_t, pitch) }, \
          { "yaw", NULL, MAVLINK_TYPE_INT16_T, 0, 4, offsetof(mavlink_pfd_t, yaw) }, \
          { "altitude", NULL, MAVLINK_TYPE_INT16_T, 0, 6, offsetof(mavlink_pfd_t, altitude) }, \
          { "airspeed", NULL, MAVLINK_TYPE_INT16_T, 0, 8, offsetof(mavlink_pfd_t, airspeed) }, \
+         { "battI", NULL, MAVLINK_TYPE_INT16_T, 0, 10, offsetof(mavlink_pfd_t, battI) }, \
          } \
 }
 
@@ -42,10 +44,11 @@ typedef struct __mavlink_pfd_t
  * @param yaw Yaw angle (magnetic heading) in 0.01 degrees. Positive means yawing CW. 
  * @param altitude altitude (AGL) in meters. 
  * @param airspeed airspeed in 0.1 m/s. 
+ * @param battI Battery current in 0.01 A. 
  * @return length of the message in bytes (excluding serial stream start sign)
  */
 static inline uint16_t mavlink_msg_pfd_pack(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg,
-						       int16_t roll, int16_t pitch, int16_t yaw, int16_t altitude, int16_t airspeed)
+						       int16_t roll, int16_t pitch, int16_t yaw, int16_t altitude, int16_t airspeed, int16_t battI)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
 	char buf[MAVLINK_MSG_ID_PFD_LEN];
@@ -54,6 +57,7 @@ static inline uint16_t mavlink_msg_pfd_pack(uint8_t system_id, uint8_t component
 	_mav_put_int16_t(buf, 4, yaw);
 	_mav_put_int16_t(buf, 6, altitude);
 	_mav_put_int16_t(buf, 8, airspeed);
+	_mav_put_int16_t(buf, 10, battI);
 
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), buf, MAVLINK_MSG_ID_PFD_LEN);
 #else
@@ -63,6 +67,7 @@ static inline uint16_t mavlink_msg_pfd_pack(uint8_t system_id, uint8_t component
 	packet.yaw = yaw;
 	packet.altitude = altitude;
 	packet.airspeed = airspeed;
+	packet.battI = battI;
 
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), &packet, MAVLINK_MSG_ID_PFD_LEN);
 #endif
@@ -86,11 +91,12 @@ static inline uint16_t mavlink_msg_pfd_pack(uint8_t system_id, uint8_t component
  * @param yaw Yaw angle (magnetic heading) in 0.01 degrees. Positive means yawing CW. 
  * @param altitude altitude (AGL) in meters. 
  * @param airspeed airspeed in 0.1 m/s. 
+ * @param battI Battery current in 0.01 A. 
  * @return length of the message in bytes (excluding serial stream start sign)
  */
 static inline uint16_t mavlink_msg_pfd_pack_chan(uint8_t system_id, uint8_t component_id, uint8_t chan,
 							   mavlink_message_t* msg,
-						           int16_t roll,int16_t pitch,int16_t yaw,int16_t altitude,int16_t airspeed)
+						           int16_t roll,int16_t pitch,int16_t yaw,int16_t altitude,int16_t airspeed,int16_t battI)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
 	char buf[MAVLINK_MSG_ID_PFD_LEN];
@@ -99,6 +105,7 @@ static inline uint16_t mavlink_msg_pfd_pack_chan(uint8_t system_id, uint8_t comp
 	_mav_put_int16_t(buf, 4, yaw);
 	_mav_put_int16_t(buf, 6, altitude);
 	_mav_put_int16_t(buf, 8, airspeed);
+	_mav_put_int16_t(buf, 10, battI);
 
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), buf, MAVLINK_MSG_ID_PFD_LEN);
 #else
@@ -108,6 +115,7 @@ static inline uint16_t mavlink_msg_pfd_pack_chan(uint8_t system_id, uint8_t comp
 	packet.yaw = yaw;
 	packet.altitude = altitude;
 	packet.airspeed = airspeed;
+	packet.battI = battI;
 
         memcpy(_MAV_PAYLOAD_NON_CONST(msg), &packet, MAVLINK_MSG_ID_PFD_LEN);
 #endif
@@ -130,7 +138,7 @@ static inline uint16_t mavlink_msg_pfd_pack_chan(uint8_t system_id, uint8_t comp
  */
 static inline uint16_t mavlink_msg_pfd_encode(uint8_t system_id, uint8_t component_id, mavlink_message_t* msg, const mavlink_pfd_t* pfd)
 {
-	return mavlink_msg_pfd_pack(system_id, component_id, msg, pfd->roll, pfd->pitch, pfd->yaw, pfd->altitude, pfd->airspeed);
+	return mavlink_msg_pfd_pack(system_id, component_id, msg, pfd->roll, pfd->pitch, pfd->yaw, pfd->altitude, pfd->airspeed, pfd->battI);
 }
 
 /**
@@ -144,7 +152,7 @@ static inline uint16_t mavlink_msg_pfd_encode(uint8_t system_id, uint8_t compone
  */
 static inline uint16_t mavlink_msg_pfd_encode_chan(uint8_t system_id, uint8_t component_id, uint8_t chan, mavlink_message_t* msg, const mavlink_pfd_t* pfd)
 {
-	return mavlink_msg_pfd_pack_chan(system_id, component_id, chan, msg, pfd->roll, pfd->pitch, pfd->yaw, pfd->altitude, pfd->airspeed);
+	return mavlink_msg_pfd_pack_chan(system_id, component_id, chan, msg, pfd->roll, pfd->pitch, pfd->yaw, pfd->altitude, pfd->airspeed, pfd->battI);
 }
 
 /**
@@ -156,10 +164,11 @@ static inline uint16_t mavlink_msg_pfd_encode_chan(uint8_t system_id, uint8_t co
  * @param yaw Yaw angle (magnetic heading) in 0.01 degrees. Positive means yawing CW. 
  * @param altitude altitude (AGL) in meters. 
  * @param airspeed airspeed in 0.1 m/s. 
+ * @param battI Battery current in 0.01 A. 
  */
 #ifdef MAVLINK_USE_CONVENIENCE_FUNCTIONS
 
-static inline void mavlink_msg_pfd_send(mavlink_channel_t chan, int16_t roll, int16_t pitch, int16_t yaw, int16_t altitude, int16_t airspeed)
+static inline void mavlink_msg_pfd_send(mavlink_channel_t chan, int16_t roll, int16_t pitch, int16_t yaw, int16_t altitude, int16_t airspeed, int16_t battI)
 {
 #if MAVLINK_NEED_BYTE_SWAP || !MAVLINK_ALIGNED_FIELDS
 	char buf[MAVLINK_MSG_ID_PFD_LEN];
@@ -168,6 +177,7 @@ static inline void mavlink_msg_pfd_send(mavlink_channel_t chan, int16_t roll, in
 	_mav_put_int16_t(buf, 4, yaw);
 	_mav_put_int16_t(buf, 6, altitude);
 	_mav_put_int16_t(buf, 8, airspeed);
+	_mav_put_int16_t(buf, 10, battI);
 
 #if MAVLINK_CRC_EXTRA
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_PFD, buf, MAVLINK_MSG_ID_PFD_LEN, MAVLINK_MSG_ID_PFD_CRC);
@@ -181,6 +191,7 @@ static inline void mavlink_msg_pfd_send(mavlink_channel_t chan, int16_t roll, in
 	packet.yaw = yaw;
 	packet.altitude = altitude;
 	packet.airspeed = airspeed;
+	packet.battI = battI;
 
 #if MAVLINK_CRC_EXTRA
     _mav_finalize_message_chan_send(chan, MAVLINK_MSG_ID_PFD, (const char *)&packet, MAVLINK_MSG_ID_PFD_LEN, MAVLINK_MSG_ID_PFD_CRC);
@@ -246,6 +257,16 @@ static inline int16_t mavlink_msg_pfd_get_airspeed(const mavlink_message_t* msg)
 }
 
 /**
+ * @brief Get field battI from pfd message
+ *
+ * @return Battery current in 0.01 A. 
+ */
+static inline int16_t mavlink_msg_pfd_get_battI(const mavlink_message_t* msg)
+{
+	return _MAV_RETURN_int16_t(msg,  10);
+}
+
+/**
  * @brief Decode a pfd message into a struct
  *
  * @param msg The message to decode
@@ -259,6 +280,7 @@ static inline void mavlink_msg_pfd_decode(const mavlink_message_t* msg, mavlink_
 	pfd->yaw = mavlink_msg_pfd_get_yaw(msg);
 	pfd->altitude = mavlink_msg_pfd_get_altitude(msg);
 	pfd->airspeed = mavlink_msg_pfd_get_airspeed(msg);
+	pfd->battI = mavlink_msg_pfd_get_battI(msg);
 #else
 	memcpy(pfd, _MAV_PAYLOAD(msg), MAVLINK_MSG_ID_PFD_LEN);
 #endif

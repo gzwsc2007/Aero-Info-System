@@ -36,11 +36,12 @@ static void mavlink_updatePFDStruct(void)
     MPU_struct_busy = RT_FALSE;
     // gather altitude info
     BMP085_getTempAndPres(&temp, &pres);
-    mavlinkPFDStruct.altitude = (int16_t)BMP085_presToAlt(pres);
+    mavlinkPFDStruct.altitude = (int16_t)(BMP085_presToAlt(pres) * 10.0);
     mavlinkNavDStruct.temp = (int16_t)temp;
-
     // gather airspeed info
     mavlinkPFDStruct.airspeed = (int16_t)(getAirspeed() * 10.0);
+    // gather battery current info
+    mavlinkPFDStruct.battI = (int16_t)(getBattCurrent() * 100); // in 0.01 A
 }
 
 static void mavlink_updateNavDStruct(void)
@@ -50,12 +51,11 @@ static void mavlink_updateNavDStruct(void)
     
     mavlinkNavDStruct.latitude = (int32_t)GPS_Data.latitude;
     mavlinkNavDStruct.longitude = (int32_t)GPS_Data.longitude;
-    mavlinkNavDStruct.course = (int16_t)GPS_Data.course;
-    mavlinkNavDStruct.groundspeed = (int16_t)GPS_Data.speed;
+    mavlinkNavDStruct.course = (uint16_t)GPS_Data.course;
+    mavlinkNavDStruct.groundspeed = (uint16_t)GPS_Data.speed;
     
     // battery info
     mavlinkNavDStruct.battV = (int16_t)(getBattVoltage() * 100); // in 0.01 Volt
-    mavlinkNavDStruct.battI = (int16_t)(getBattCurrent() * 100); // in 0.01 A
 }
 
 void mavlink_thread_entry(void *parameter) 
@@ -84,7 +84,8 @@ void mavlink_thread_entry(void *parameter)
                              mavlinkPFDStruct.pitch,
                              mavlinkPFDStruct.yaw,
                              mavlinkPFDStruct.altitude,
-                             mavlinkPFDStruct.airspeed);
+                             mavlinkPFDStruct.airspeed,
+                             mavlinkPFDStruct.battI);
         
         // copy the message to the send buffer
         len = mavlink_msg_to_send_buffer(buf, &msg);
@@ -93,7 +94,7 @@ void mavlink_thread_entry(void *parameter)
         
         
         /* Send NavD data at 5 Hz */
-        if (cnt >= 5)
+        if (cnt >= 3)
         {
             cnt = 0;
             
@@ -105,7 +106,6 @@ void mavlink_thread_entry(void *parameter)
                              200, // component ID - IMU
                              &msg,
                              mavlinkNavDStruct.battV,
-                             mavlinkNavDStruct.battI,
                              mavlinkNavDStruct.temp,
                              mavlinkNavDStruct.latitude,
                              mavlinkNavDStruct.longitude,

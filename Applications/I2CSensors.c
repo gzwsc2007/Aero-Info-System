@@ -105,12 +105,10 @@ void ADS1115_thread_entry(void *param)
     rt_uint8_t subCnt = 0;
     double prevAspd = 0;
     
-    if (rt_sem_init(&sem_adc, "sem_adc", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
-        rt_kprintf("rt_sem_init error\n");
+    ADS1115_Init();
     
-    calibrateAirspeed();
-    
-    rt_thread_delay(10000);
+    //if (rt_sem_init(&sem_adc, "sem_adc", 0, RT_IPC_FLAG_FIFO) != RT_EOK)
+    //    rt_kprintf("rt_sem_init error\n");
     
     ADS1115_setGain(GAIN_TWOTHIRDS);
     
@@ -118,6 +116,8 @@ void ADS1115_thread_entry(void *param)
     // many analog sensors.
     Vdd = ((double)ADS1115_readSingleEnded(ADC_CHAN_VDD)) * fullscale /
            (double)(0x7FFF);
+    
+    rt_thread_delay(10000);
     
     // find neutral positions for airspeed
     calibrateAirspeed();
@@ -223,7 +223,6 @@ double getAirspeed(void)
 void BMP085_thread_entry(void *parameters)
 {
     rt_uint8_t cnt = 20;
-    rt_base_t level;
     rwlock_init(&baroLock);
     
     // initialize the ground level pressure
@@ -272,7 +271,6 @@ void I2CSensors_Init(void)
     EXTI_Configuration();
     NVIC_Configuration();
     
-    ADS1115_Init();
     BMP085_Init();
     //if (!HMC5883_Init())
     //    rt_kprintf("HMC5883L Init failed\n");
@@ -285,11 +283,18 @@ static void ADS1115_Init()
 {
     rt_uint16_t hi_thresh_val = 0x8000;
     rt_uint16_t lo_thresh_val = 0x0000;
+    //rt_uint16_t check = 0;
+    //rt_int16_t shit = 0;
     
     ADS1115_setGain(GAIN_TWOTHIRDS); // need to first measure Vdd
     
     I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_LOWTHRESH, lo_thresh_val);
     I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_HITHRESH, hi_thresh_val);
+
+    //check = (rt_int16_t)I2C_readTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_HITHRESH);
+    //shit = check;
+    
+    return;
 }
 
 /*
@@ -331,15 +336,17 @@ rt_int16_t ADS1115_readSingleEnded(rt_uint8_t channel) {
     // Set the "start single-conversion" bit
     config |= ADS1115_REG_CONFIG_OS_SINGLE;
     
-    sem_adc.value = 0;
+    //sem_adc.value = 0;
     // Apply the config and start the conversion immediately
     I2C_writeTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_CONFIG, config);
     
     // suspend the calling thread until conversion is ready. sem_adc will be
     // released as soon as the RDY pin is pulled low and an interrupt is 
     // triggered.
-    rt_sem_take(&sem_adc, 5);
+    //rt_sem_take(&sem_adc, 5);
 
+    rt_thread_delay(5);
+    
     return (rt_int16_t)I2C_readTwoBytes(ADS1115_ADDR, ADS1115_REG_POINTER_CONVERT);
 }
 
@@ -754,11 +761,14 @@ static rt_uint8_t I2C_read_nack(I2C_TypeDef* I2Cx)
 {
     rt_base_t level;
     rt_uint8_t result;
+    rt_uint16_t cnt = 0;
+
     
     // Note: access of the I2C bus here is protected by shutting down
     // the IRQs and the scheduler, so that the accessing process
     // will not be interrupted. Bad things happen if I don't do this.
-    // (Inspired by AN2824 from ST)
+    // (Inspired byAN2824 from ST)
+    __disable_irq();
     level = rt_hw_interrupt_disable();
     
 	// disabe acknowledge of received data
@@ -768,11 +778,20 @@ static rt_uint8_t I2C_read_nack(I2C_TypeDef* I2Cx)
 	I2C_GenerateSTOP(I2Cx, ENABLE);
 
 	// wait until one byte has been received
-	while( !I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_RECEIVED) );
+	while( !I2C_CheckEvent(I2Cx, I2C_EVENT_MASTER_BYTE_RECEIVED) )
+    {
+        if (cnt++ > 1000) 
+        {
+            cnt = 0;
+            break;
+        }
+    }
+    
 	// read data from I2C data register and return data byte
 	result = (rt_uint8_t) I2C_ReceiveData(I2Cx);
     
     rt_hw_interrupt_enable(level);
+    __enable_irq();
     return result;
 }
 

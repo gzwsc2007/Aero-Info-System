@@ -8,7 +8,7 @@
 #define VBATT_SCALING_FACTOR 3.467261 //  (R1 + R2) / R2
 
 #define ADC_CHAN_VBATT      1 // ADC channel for measuring LiPo Batt voltage
-#define ADC_CHAN_VCURRENT   0 // ADC channel for measuring battery current
+#define ADC_CHAN_VCURRENT   3 // ADC channel for measuring battery current
 #define ADC_CHAN_VAIRSPEED  2 // ADC channel for measruing airspeed sensor
 #define ADC_CHAN_VDD        3 // ADC channel for measuring the 5V power supply
 

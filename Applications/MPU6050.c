@@ -48,7 +48,7 @@ void USART3_IRQHandler()
                 if (temp > 33 || (parse(rxbuf, &MPU_Data) == -1))
                     memset(&MPU_Data, 0, sizeof(MPU_Data)); // deal with error
                 MPU_struct_busy = RT_FALSE;
-                rt_event_send(&event_drdy, EVENT_ATTITUDE_DATA_RDY);
+               // rt_event_send(&event_drdy, EVENT_ATTITUDE_DATA_RDY);
             }
         }
         
